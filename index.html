@@ -609,12 +609,30 @@ function parseAmberReport(html, sourceName) {
     }
     rows[rowIndex] = {
       i: rowIndex,
+      recordIndex: rowIndex,
       distanceFt,
       zone: zoneIdx >= 0 && r[zoneIdx] ? r[zoneIdx].raw : null,
       comment: commentIdx >= 0 && r[commentIdx] ? r[commentIdx].raw : null,
       gps: gpsIdx >= 0 && r[gpsIdx] ? r[gpsIdx].raw : null,
       cells: r,
     };
+  }
+
+  // A run may be recorded from high to low mileage (or, rarely, be non-monotonic).
+  // Everything downstream (binary searches, extents, plotting) assumes rows are in
+  // ascending mileage order, so normalise here and remember the recorded direction.
+  let ascendingSteps = 0, descendingSteps = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const delta = rows[i].distanceFt - rows[i - 1].distanceFt;
+    if (delta > 0) ascendingSteps++;
+    else if (delta < 0) descendingSteps++;
+  }
+  const recordedDescending = descendingSteps > ascendingSteps;
+  if (descendingSteps > 0) {
+    rows.sort((a, b) =>
+      (a.distanceFt - b.distanceFt) ||
+      (recordedDescending ? b.recordIndex - a.recordIndex : a.recordIndex - b.recordIndex));
+    for (let i = 0; i < rows.length; i++) rows[i].i = i;
   }
 
   return {
@@ -626,6 +644,7 @@ function parseAmberReport(html, sourceName) {
     columns,
     plottable,
     rows,
+    recordedDescending,
     milesIdx, feetIdx, zoneIdx, commentIdx, gpsIdx,
   };
 }
@@ -1105,6 +1124,7 @@ function renderReportHeader(entry) {
     ['Start loc', fieldVal(r.info.job, 'Start Location')],
     ['End loc', fieldVal(r.info.job, 'End Location')],
     ['Direction', fieldVal(r.info.job, 'Direction Of Travel')],
+    ['Recorded', r.recordedDescending ? 'High→low mileage (plotted low→high)' : null],
     ['Points', r.rows.length.toLocaleString()],
   ].filter(([, v]) => v);
   el.quickGlance.innerHTML = qgFields.map(([k, v]) => `
